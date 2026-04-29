@@ -6,12 +6,9 @@ import time
 import json
 import os
 
-# ─────────────────────────────────────────────
-# 1. TWILIO CREDENTIALS
-# ─────────────────────────────────────────────
-TWILIO_SID   = "AC9b4adfaf857b71fa747eb912451d1d7e"
-TWILIO_TOKEN = "f6c2cb16f78b43c758959600b91ded5b"
-TWILIO_FROM  = "whatsapp:+15559296253"
+TWILIO_SID   = st.secrets["TWILIO_SID"]
+TWILIO_TOKEN = st.secrets["TWILIO_TOKEN"]
+TWILIO_FROM  = st.secrets["TWILIO_FROM"]
 
 try:
     twilio_client = Client(TWILIO_SID, TWILIO_TOKEN)
