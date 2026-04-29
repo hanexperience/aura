@@ -44,8 +44,9 @@ def save_to_supabase():
             "data": data_to_save,
             "updated_at": "now()"
         }).execute()
-    except Exception:
-        pass # Fail silently to prevent UI disruption
+    except Exception as e:
+        # CHANGE 'pass' TO THIS:
+        st.error(f"Sync Error: {e}")
 
 def load_from_supabase():
     """Fetches the last saved state from Supabase."""
