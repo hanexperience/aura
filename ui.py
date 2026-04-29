@@ -1,9 +1,10 @@
 import streamlit as st
 from twilio.rest import Client
 from supabase import create_client, Client as SupabaseClient
-import uuid, time, json, os
+import uuid, time, json, os, random
 from datetime import date, datetime
 from collections import defaultdict
+import time
 
 # ─────────────────────────────────────────────
 # PAGE CONFIG — must be first Streamlit call
@@ -324,6 +325,144 @@ def fire_cue(cue_id, label, text, targets, people_lookup, session_id):
     for e in errors:
         st.error(e)
 
+def run_countdown(seconds):
+    """Displays a countdown timer in a single updating line."""
+    # Create a single placeholder slot
+    timer_placeholder = st.empty()
+    
+    for i in range(seconds, -1, -1):
+        # Overwrite the same slot with the new number
+        timer_placeholder.markdown(
+            f'<div style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;'
+            f'color:#c8b89a;letter-spacing:0.05em;">⏱ COUNTDOWN: {i}s</div>', 
+            unsafe_allow_html=True
+        )
+        time.sleep(1)
+    
+    # Clear the timer when done
+    timer_placeholder.empty()
+
+def run_nexus_timer(seconds):
+    """Counts down in a single, non-scrolling line."""
+    # 1. This creates a 'reserved' space in the UI
+    timer_slot = st.empty()
+    
+    for i in range(seconds, -1, -1):
+        # 2. This overwrites the SAME space every second
+        timer_slot.markdown(
+            f'<div style="font-family:\'IBM Plex Mono\',monospace; font-size:11px; '
+            f'color:#c8b89a; letter-spacing:0.08em; padding: 10px 0;">'
+            f'⏱ SYSTEM_COUNTDOWN: {i}s</div>', 
+            unsafe_allow_html=True
+        )
+        time.sleep(1)
+    
+    # 3. Clean up the slot when finished
+    timer_slot.empty()
+    
+# ─────────────────────────────────────────────
+# AUTO-FIRE HELPERS
+# ─────────────────────────────────────────────
+def _resolve_beat_cues(entries, lib_by_id):
+    """Convert plan entries → [(cue_id, base_cue_dict, targets)]. Skips unresolved."""
+    result = []
+    for entry in entries:
+        cue_id = entry.get("cue_id") if isinstance(entry, dict) else entry
+        base   = lib_by_id.get(cue_id)
+        if base:
+            targets = entry.get("targets", []) if isinstance(entry, dict) else []
+            result.append((cue_id, base, targets))
+    return result
+
+def shuffle_cast_for_beat(entries, cast_names):
+    """Assign one cast member per cue, round-robin after shuffling. Modifies entries in-place."""
+    if not cast_names or not entries:
+        return
+    pool = cast_names.copy()
+    random.shuffle(pool)
+    for i, entry in enumerate(entries):
+        if isinstance(entry, dict):
+            entry["targets"] = [pool[i % len(pool)]]
+
+def auto_fire_beat_seq(valid_cues, all_people, session_id, wait_sec, beat_name):
+    """
+    Fires a sequence of cues with a single-line countdown between each.
+    Matches the call site: (valid, all_people, session_id, dur_secs, beat_name)
+    """
+    n = len(valid_cues)
+    with st.status(f"Firing {n} cues for '{beat_name}'...", expanded=True) as status:
+        # Placeholder to prevent multiple lines
+        countdown_slot = st.empty()
+        
+        for i, (cue_id, base, targets) in enumerate(valid_cues):
+            # If not the first cue, wait the specified time
+            if i > 0:
+                deadline = time.time() + float(wait_sec)
+                while time.time() < deadline:
+                    remaining = deadline - time.time()
+                    # Update the same slot instead of writing a new line
+                    countdown_slot.markdown(
+                        f'<div style="font-family:\'IBM Plex Mono\',monospace; font-size:11px; color:#c8b89a;">'
+                        f'Next: <em>{base["label"]}</em> in <strong>{remaining:.0f}s</strong> · [{i + 1}/{n}]</div>',
+                        unsafe_allow_html=True
+                    )
+                    time.sleep(0.4)
+                
+                # Clear countdown before firing
+                countdown_slot.empty()
+
+            # --- FIXED: Using the correct function name 'fire_cue' ---
+            fire_cue(cue_id, base["label"], base["text"], targets, all_people, session_id)
+            
+            tgt_str = ", ".join(targets) if targets else "—"
+            status.write(f" ↳ ✅ *{base['label']}* → {tgt_str}")
+            
+        status.update(label=f"✅ Beat complete · {n} cues sent", state="complete")
+
+def auto_fire_scene(scene_data, all_people, session_id, scene_label):
+    """Fire all beats in a scene sequentially with a clean UI."""
+    total = sum(len(v) for _, v, _ in scene_data)
+    
+    with st.status(
+        f"🎬  {scene_label}  ·  {total} cues across {len(scene_data)} beats",
+        expanded=True
+    ) as status:
+        countdown_slot = st.empty()
+        
+        for beat_name, valid_cues, duration_secs in scene_data:
+            n = len(valid_cues)
+            dur_label = f"{duration_secs / 60:.1f} min" if duration_secs > 0 else "instant"
+            status.write(f"**{beat_name}** · {n} cues · {dur_label}")
+            
+            if duration_secs <= 0:
+                offsets = [i * 0.35 for i in range(n)]
+            else:
+                offsets = sorted(random.uniform(0, duration_secs) for _ in range(n))
+            
+            beat_start = time.time()
+            for i, ((cue_id, base, targets), offset) in enumerate(zip(valid_cues, offsets)):
+                elapsed = time.time() - beat_start
+                wait = offset - elapsed
+                
+                if wait > 0:
+                    deadline = time.time() + wait
+                    while time.time() < deadline:
+                        remaining = deadline - time.time()
+                        countdown_slot.markdown(
+                            f'<div style="font-family:\'IBM Plex Mono\',monospace; font-size:11px; color:#c8b89a; margin-left: 20px;">'
+                            f'↳ Next: <em>{base["label"]}</em> in <strong>{remaining:.0f}s</strong> [{i + 1}/{n}]</div>',
+                            unsafe_allow_html=True
+                        )
+                        time.sleep(0.4)
+                    countdown_slot.empty()
+
+                # --- FIXED: Using the correct function name 'fire_cue' ---
+                fire_cue(cue_id, base["label"], base["text"], targets, all_people, session_id)
+                tgt_str = ", ".join(targets) if targets else "—"
+                status.write(f"  ↳ ✅ *{base['label']}* → {tgt_str}")
+                
+        status.update(label=f"✅ Scene complete · {total} cues sent", state="complete")
+        
 # ─────────────────────────────────────────────
 # HTML HELPERS
 # ─────────────────────────────────────────────
@@ -445,18 +584,110 @@ with tab_fire:
                 unsafe_allow_html=True
             )
         else:
+            cast_names_only = list(cast_lookup.keys())
+
             for scene_name, beats in plan.items():
                 phase = SCENE_PHASE_MAP.get(scene_name, 0)
                 _, pc = PHASE_CONFIG.get(phase, ("", "#888888"))
-                st.markdown(
+
+                # Scene header + Fire Scene button
+                sh1, sh2 = st.columns([4, 1])
+                sh1.markdown(
                     f'<div style="margin-top:1.5rem;margin-bottom:0.4rem;'
                     f'font-family:\'IBM Plex Mono\',monospace;font-size:10px;'
                     f'letter-spacing:0.1em;text-transform:uppercase;color:{pc};">'
                     f'{scene_name} &nbsp;{phase_badge(phase)}</div>',
                     unsafe_allow_html=True
                 )
+                if sh2.button(
+                    "\U0001f3ac Fire Scene",
+                    key=f"fire_scene_{session_id}_{scene_name}",
+                    use_container_width=True
+                ):
+                    if locked:
+                        st.warning("Session is locked.")
+                    else:
+                        scene_data = []
+                        for bn, ents in beats.items():
+                            dur_secs = st.session_state.get(
+                                f"dur_{session_id}_{bn}", 2.0
+                            ) * 60
+                            valid = _resolve_beat_cues(ents, lib_by_id)
+                            if valid:
+                                scene_data.append((bn, valid, dur_secs))
+                        if scene_data:
+                            auto_fire_scene(scene_data, all_people, session_id, scene_name)
+                            sb_update_plan(session_id, plan)
+
+                # Beat loops
                 for beat_name, entries in beats.items():
-                    with st.expander(f"↳ {beat_name}  ·  {len(entries)} cues", expanded=True):
+                    valid_count = sum(
+                        1 for e in entries
+                        if lib_by_id.get(e.get("cue_id") if isinstance(e, dict) else e)
+                    )
+                    with st.expander(f"\u21b3 {beat_name}  \u00b7  {valid_count} cues", expanded=True):
+
+                        # Beat control bar
+                        dur_key = f"dur_{session_id}_{beat_name}"
+                        if dur_key not in st.session_state:
+                            st.session_state[dur_key] = 2.0
+
+                        bc1, bc2, bc3, bc4 = st.columns([1.8, 1, 1, 1])
+                        bc1.markdown(mono("Duration (min)", "9px", "#4a4a46"), unsafe_allow_html=True)
+                        new_dur = bc1.number_input(
+                            "min", min_value=0.0, max_value=30.0, step=0.5,
+                            value=float(st.session_state[dur_key]),
+                            key=f"dur_input_{session_id}_{beat_name}",
+                            label_visibility="collapsed", format="%.1f"
+                        )
+                        st.session_state[dur_key] = new_dur
+
+                        if bc2.button(
+                            "\u21c4 Shuffle",
+                            key=f"shuf_{session_id}_{beat_name}",
+                            use_container_width=True
+                        ):
+                            if not locked and cast_names_only:
+                                shuffle_cast_for_beat(entries, cast_names_only)
+                                sb_update_plan(session_id, plan)
+                                st.rerun()
+
+                        if bc3.button(
+                            "\u25b6 All",
+                            key=f"fall_{session_id}_{beat_name}",
+                            use_container_width=True,
+                            help="Fire all cues instantly with small stagger"
+                        ):
+                            if locked:
+                                st.warning("Session is locked.")
+                            else:
+                                valid = _resolve_beat_cues(entries, lib_by_id)
+                                auto_fire_beat_seq(valid, all_people, session_id, 0, beat_name)
+                                sb_update_plan(session_id, plan)
+
+                        if bc4.button(
+                            "\u23f1 Auto",
+                            key=f"auto_{session_id}_{beat_name}",
+                            use_container_width=True,
+                            type="primary",
+                            help="Randomise cues across the set duration window"
+                        ):
+                            if locked:
+                                st.warning("Session is locked.")
+                            else:
+                                valid    = _resolve_beat_cues(entries, lib_by_id)
+                                dur_secs = st.session_state[dur_key] * 60
+                                auto_fire_beat_seq(
+                                    valid, all_people, session_id, dur_secs, beat_name
+                                )
+                                sb_update_plan(session_id, plan)
+
+                        st.markdown(
+                            '<hr style="border-color:rgba(255,255,255,0.05);margin:0.5rem 0;">',
+                            unsafe_allow_html=True
+                        )
+
+                        # Individual cues
                         for entry in entries:
                             cue_id = entry.get("cue_id") if isinstance(entry, dict) else entry
                             base   = lib_by_id.get(cue_id)
@@ -482,13 +713,17 @@ with tab_fire:
                                 )
                                 if isinstance(entry, dict):
                                     entry["targets"] = selected
-                                if h2.button("\u25b6", key=f"fire_{session_id}_{cue_id}",
-                                             type="primary", use_container_width=True):
+                                if h2.button(
+                                    "\u25b6", key=f"fire_{session_id}_{cue_id}",
+                                    type="primary", use_container_width=True
+                                ):
                                     if locked:
                                         st.warning("Session is locked.")
                                     else:
-                                        fire_cue(cue_id, base["label"], base["text"],
-                                                 selected, all_people, session_id)
+                                        fire_cue(
+                                            cue_id, base["label"], base["text"],
+                                            selected, all_people, session_id
+                                        )
                                         sb_update_plan(session_id, plan)
 
         # Live log
@@ -725,6 +960,8 @@ with tab_sessions:
                                 sb_update_plan(edit_id, plan)
                                 st.rerun()
 
+
+# ═══════════════════════════════════════════════════════════════
 
 # ═══════════════════════════════════════════════════════════════
 # TAB 3 · LIBRARY
