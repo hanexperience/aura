@@ -1,0 +1,501 @@
+{
+  "project": "SSF-2026-HERE-NOW",
+  "title": "Here & Now — Nexus Cue Library",
+  "version": "1.0",
+  "theme": "School at night. Bodies and voices that begin contained, institutional, whispered — and slowly open into something true.",
+  "scenes": [
+    {
+      "id": "scene-1",
+      "name": "Scene 1: Arrival",
+      "phase": 1,
+      "phaseLabel": "Exposure",
+      "description": "Students enter the building. The film begins in the institutional register — contained, role-bound, small. The camera watches them inhabit a space they know.",
+      "beats": [
+        {
+          "id": "beat-1-1",
+          "name": "Beat 1: First Contact",
+          "description": "The moment of arrival. Students in the building after dark for the first time on camera. Everything is heightened self-consciousness.",
+          "cues": [
+            {
+              "id": "cue-1-1-1",
+              "label": "Threshold",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "You know this building. Tonight it doesn't quite know you back."
+            },
+            {
+              "id": "cue-1-1-2",
+              "label": "Permission",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "You are allowed to not know what comes next."
+            },
+            {
+              "id": "cue-1-1-3",
+              "label": "Anchor",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "Find one thing in this corridor that is real. Stay near it."
+            },
+            {
+              "id": "cue-1-1-4",
+              "label": "The Body Knows",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "Your body has walked this corridor a hundred times. Tonight the walk is different. Let it be different."
+            }
+          ]
+        },
+        {
+          "id": "beat-1-2",
+          "name": "Beat 2: The Institutional Body",
+          "description": "Students moving through the space in the contained register. Whispered. Cautious. The school as it feels after hours.",
+          "cues": [
+            {
+              "id": "cue-1-2-1",
+              "label": "Small",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "You know exactly how to make yourself smaller in this building. You've been practising for years."
+            },
+            {
+              "id": "cue-1-2-2",
+              "label": "Listening",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "You can hear things in this building you can't hear during the day. Listen."
+            },
+            {
+              "id": "cue-1-2-3",
+              "label": "Shouldn't Be Here",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "Some part of you thinks you shouldn't be here. That part is wrong."
+            },
+            {
+              "id": "cue-1-2-4",
+              "label": "The Watcher",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "Someone is watching you very carefully. Let them."
+            },
+            {
+              "id": "cue-1-2-5",
+              "label": "Role",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "You know exactly what role you play in this building during the day. You're not playing it now."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scene-2",
+      "name": "Scene 2: The Reason",
+      "phase": 1,
+      "phaseLabel": "Exposure",
+      "description": "Each student has a private reason for being in the building tonight. They haven't told each other. The cues probe this interior space without forcing it to the surface.",
+      "beats": [
+        {
+          "id": "beat-2-1",
+          "name": "Beat 1: The Private Thing",
+          "description": "Interior state work. The camera gets close. Subtexts that create a private event the lens can find.",
+          "cues": [
+            {
+              "id": "cue-2-1-1",
+              "label": "Secret",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "You have a reason for being here tonight that you haven't told anyone. You don't have to. Just know it."
+            },
+            {
+              "id": "cue-2-1-2",
+              "label": "Decision",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "You made a decision this evening that you haven't told anyone about yet."
+            },
+            {
+              "id": "cue-2-1-3",
+              "label": "Left Behind",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "You left something behind today. You're not sure if you meant to."
+            },
+            {
+              "id": "cue-2-1-4",
+              "label": "Unfinished",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "There's something in this building you haven't finished. You came back for it."
+            },
+            {
+              "id": "cue-2-1-5",
+              "label": "Memory",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "This exact spot holds a memory you weren't expecting to find tonight."
+            }
+          ]
+        },
+        {
+          "id": "beat-2-2",
+          "name": "Beat 2: First Contact With Another",
+          "description": "Students begin to notice each other. The social negotiation of being found somewhere unexpected.",
+          "cues": [
+            {
+              "id": "cue-2-2-1",
+              "label": "Found",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "You didn't expect to find someone else here. You're not sure how you feel about it."
+            },
+            {
+              "id": "cue-2-2-2",
+              "label": "Explain",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "You're not sure whether to explain yourself. You don't have to."
+            },
+            {
+              "id": "cue-2-2-3",
+              "label": "Seen",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "They can see something in you right now that no one sees during school hours."
+            },
+            {
+              "id": "cue-2-2-4",
+              "label": "Relational — Push",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "You trust them more than you're letting on."
+            },
+            {
+              "id": "cue-2-2-5",
+              "label": "Relational — Pull",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "You're not sure they mean it yet. Wait."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scene-3",
+      "name": "Scene 3: The Forgetting",
+      "phase": 2,
+      "phaseLabel": "Forgetting",
+      "description": "The task absorbs. The camera recedes. Something unplanned becomes true. These cues are task-based and relational — they give students something to carry so the self-consciousness dissolves.",
+      "beats": [
+        {
+          "id": "beat-3-1",
+          "name": "Beat 1: Task Absorption",
+          "description": "Give them something to do that is more real than performing. The task becomes the container.",
+          "cues": [
+            {
+              "id": "cue-3-1-1",
+              "label": "Task — The Object",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "Find something in this room that doesn't belong here. Don't touch it. Just know where it is."
+            },
+            {
+              "id": "cue-3-1-2",
+              "label": "Task — The Space",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "Find the part of this room that is most yours. Stand in it."
+            },
+            {
+              "id": "cue-3-1-3",
+              "label": "Task — The Other",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "Watch the person nearest to you without watching them. Know what they're feeling."
+            },
+            {
+              "id": "cue-3-1-4",
+              "label": "The Camera Disappears",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "The task is the only thing. Everything else — including the camera — doesn't matter right now."
+            },
+            {
+              "id": "cue-3-1-5",
+              "label": "Time",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "You have nowhere to be. Time is not running out. Let it slow down."
+            }
+          ]
+        },
+        {
+          "id": "beat-3-2",
+          "name": "Beat 2: The Opening",
+          "description": "The contained register begins to crack. Something more true starts to surface. Hold this. Don't interrupt it.",
+          "cues": [
+            {
+              "id": "cue-3-2-1",
+              "label": "Space",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "You are allowed to take up more space than this."
+            },
+            {
+              "id": "cue-3-2-2",
+              "label": "Voice",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "You have a voice you don't use in this building during the day. It's available now."
+            },
+            {
+              "id": "cue-3-2-3",
+              "label": "More Yourself",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "Being here after dark is making you more yourself, not less."
+            },
+            {
+              "id": "cue-3-2-4",
+              "label": "The Change",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "Something just changed. You don't need to name it. Just stay with it."
+            },
+            {
+              "id": "cue-3-2-5",
+              "label": "Arrival",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "Something is about to happen. You don't need to make it happen. Just don't get out of the way."
+            }
+          ]
+        },
+        {
+          "id": "beat-3-3",
+          "name": "Beat 3: The Genuine Exchange",
+          "description": "Two or more students in a real encounter. Something unscripted passes between them. Relational cues fired to pairs simultaneously.",
+          "cues": [
+            {
+              "id": "cue-3-3-1",
+              "label": "Tell Them — A",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "You have something to tell them. You've been waiting for the right moment. This might be it."
+            },
+            {
+              "id": "cue-3-3-2",
+              "label": "Receive — B",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "They're about to say something true. Listen to the thing underneath the words."
+            },
+            {
+              "id": "cue-3-3-3",
+              "label": "Ask",
+              "mode": "Spoken",
+              "targets": [],
+              "text": "Ask them one question you actually want to know the answer to."
+            },
+            {
+              "id": "cue-3-3-4",
+              "label": "True Thing",
+              "mode": "Spoken",
+              "targets": [],
+              "text": "Say one true thing. Not a character. You."
+            },
+            {
+              "id": "cue-3-3-5",
+              "label": "The Unsaid",
+              "mode": "Spoken",
+              "targets": [],
+              "text": "Tell them the one thing you decided not to say."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scene-4",
+      "name": "Scene 4: The Integration",
+      "phase": 3,
+      "phaseLabel": "Integration",
+      "description": "Students have moved from performers to participants. The network — edit, score, RGB, Nexus — is a unified, live thing. Cues become sparse. The film is doing the work now.",
+      "beats": [
+        {
+          "id": "beat-4-1",
+          "name": "Beat 1: Full Presence",
+          "description": "The moment the audience stops watching the system and starts watching the person. Don't interrupt it. Fire minimally.",
+          "cues": [
+            {
+              "id": "cue-4-1-1",
+              "label": "Enough",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "This is already enough."
+            },
+            {
+              "id": "cue-4-1-2",
+              "label": "Here",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "You are exactly where you are supposed to be."
+            },
+            {
+              "id": "cue-4-1-3",
+              "label": "Survived",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "You have already survived this moment. You just haven't caught up yet."
+            },
+            {
+              "id": "cue-4-1-4",
+              "label": "Don't Make",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "You don't need to make anything happen."
+            }
+          ]
+        },
+        {
+          "id": "beat-4-2",
+          "name": "Beat 2: Toward the Ending",
+          "description": "The performance finds its own close. These cues are not endings — they are conditions for one. The best ending is the one most true to the live moment.",
+          "cues": [
+            {
+              "id": "cue-4-2-1",
+              "label": "Last Time",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "This is the last time this particular group of people will be in this particular building together."
+            },
+            {
+              "id": "cue-4-2-2",
+              "label": "Witnessed",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "You have been seen tonight. Really seen. That has already happened."
+            },
+            {
+              "id": "cue-4-2-3",
+              "label": "Stay",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "Stay in it. Don't resolve it. Just stay."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scene-5",
+      "name": "Scene 5: Rehearsal Tools",
+      "phase": 0,
+      "phaseLabel": "Rehearsal Only",
+      "description": "Cues used only in workshop and rehearsal contexts — not in performance. For calibration, debrief preparation, and probing individual students.",
+      "beats": [
+        {
+          "id": "beat-5-1",
+          "name": "Beat 1: Calibration Cues",
+          "description": "Used in Mon–Thu workshops to probe and observe. Not deployed in performance.",
+          "cues": [
+            {
+              "id": "cue-5-1-1",
+              "label": "Stop Performing",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "No one here is watching you perform. They're watching you exist. Those are different things."
+            },
+            {
+              "id": "cue-5-1-2",
+              "label": "School Voice",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "That's your school voice. You have a different one."
+            },
+            {
+              "id": "cue-5-1-3",
+              "label": "Underneath",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "You don't have to answer the question they asked. You can answer the one underneath it."
+            },
+            {
+              "id": "cue-5-1-4",
+              "label": "The Protected Thing",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "There's something you're protecting right now. You don't have to give it up. Just know it's there."
+            },
+            {
+              "id": "cue-5-1-5",
+              "label": "Recovery",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "That moment didn't land. That's fine. The next one is still available."
+            }
+          ]
+        },
+        {
+          "id": "beat-5-2",
+          "name": "Beat 2: Targeted — Space & Identity",
+          "description": "For specific students who may feel most self-conscious in the institutional space. Use with judgment. Never broadcast — always targeted.",
+          "cues": [
+            {
+              "id": "cue-5-2-1",
+              "label": "Belong",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "You belong in this space exactly as much as anyone else. Possibly more."
+            },
+            {
+              "id": "cue-5-2-2",
+              "label": "Yours",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "This building has had an idea of who you are. Tonight you get to show it something else."
+            },
+            {
+              "id": "cue-5-2-3",
+              "label": "Known",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "The person you are right now — not the one this place expects — is the one the camera is looking for."
+            }
+          ]
+        },
+        {
+          "id": "beat-5-3",
+          "name": "Beat 3: The 17:00 Cue",
+          "description": "Broadcast to all students at exactly 17:00 on performance day. Fired once, into the silence of the rest period. Not direction. True.",
+          "cues": [
+            {
+              "id": "cue-5-3-1",
+              "label": "17:00 Broadcast",
+              "mode": "Subtext",
+              "targets": [],
+              "text": "Tonight is not a performance. It is the last time this particular group of people will be in this particular building together."
+            }
+          ]
+        },
+        {
+          "id": "beat-5-4",
+          "name": "Beat 4: The Q&A Cue",
+          "description": "Fired to all students as the Q&A opens. The final transmission of the project.",
+          "cues": [
+            {
+              "id": "cue-5-4-1",
+              "label": "Final Cue",
+              "mode": "Spoken",
+              "targets": [],
+              "text": "Tell them one true thing about tonight."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
