@@ -1,336 +1,916 @@
 import streamlit as st
 from twilio.rest import Client
 from supabase import create_client, Client as SupabaseClient
-import uuid
-import random
-import time
-import json
-import os
+import uuid, time, json, os
+from datetime import date, datetime
+from collections import defaultdict
 
 # ─────────────────────────────────────────────
-# 1. CREDENTIALS & CLIENTS
-# ─────────────────────────────────────────────
-TWILIO_SID   = st.secrets["TWILIO_SID"]
-TWILIO_TOKEN = st.secrets["TWILIO_TOKEN"]
-TWILIO_FROM  = st.secrets["TWILIO_FROM"]
-
-try:
-    twilio_client = Client(TWILIO_SID, TWILIO_TOKEN)
-except Exception:
-    twilio_client = None
-
-# Supabase Credentials
-try:
-    SUPABASE_URL = st.secrets["SUPABASE_URL"]
-    SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
-    supabase: SupabaseClient = create_client(SUPABASE_URL, SUPABASE_KEY)
-except Exception:
-    supabase = None
-
-# ─────────────────────────────────────────────
-# 2. PERSISTENCE LOGIC (Supabase)
-# ─────────────────────────────────────────────
-def save_to_supabase():
-    """Pushes the current rehearsal state to Supabase."""
-    if not supabase: return
-    data_to_save = {
-        "scenes": st.session_state.scenes,
-        "cast": st.session_state.cast,
-        "log": st.session_state.log
-    }
-    try:
-        supabase.table("rehearsals").upsert({
-            "id": "AURA_PROJECT_SESSION", 
-            "data": data_to_save,
-            "updated_at": "now()"
-        }).execute()
-    except Exception as e:
-        # CHANGE 'pass' TO THIS:
-        st.error(f"Sync Error: {e}")
-
-def load_from_supabase():
-    """Fetches the last saved state from Supabase."""
-    if not supabase: return False
-    try:
-        response = supabase.table("rehearsals").select("data").eq("id", "AURA_PROJECT_SESSION").execute()
-        if response.data:
-            db_data = response.data[0]['data']
-            st.session_state.scenes = db_data.get("scenes", {})
-            st.session_state.cast = db_data.get("cast", {})
-            st.session_state.log = db_data.get("log", [])
-            return True
-    except Exception:
-        return False
-    return False
-
-# ─────────────────────────────────────────────
-# 3. LIBRARY IMPORT HELPER
-# ─────────────────────────────────────────────
-LIBRARY_PATH = os.path.join(os.path.dirname(__file__), "nexus_cue_library.json")
-
-def load_library_into_scenes(path: str) -> dict:
-    if not os.path.exists(path): return {}
-    with open(path, "r", encoding="utf-8") as f:
-        lib = json.load(f)
-
-    scenes = {}
-    for scene in lib.get("scenes", []):
-        scene_name = scene["name"]
-        scenes[scene_name] = {}
-        for beat in scene.get("beats", []):
-            beat_name = beat["name"]
-            cues = []
-            for cue in beat.get("cues", []):
-                cues.append({
-                    "id":      cue.get("id", str(uuid.uuid4())),
-                    "label":   cue.get("label", ""),
-                    "text":    cue.get("text", ""),
-                    "mode":    cue.get("mode", "Subtext"),
-                    "targets": cue.get("targets", []),
-                })
-            scenes[scene_name][beat_name] = cues
-    return scenes
-
-PHASE_LABELS = {
-    "Scene 1: Arrival":         ("PHASE 1 · EXPOSURE",   "#8b7355"),
-    "Scene 2: The Reason":      ("PHASE 1 · EXPOSURE",   "#8b7355"),
-    "Scene 3: The Forgetting":  ("PHASE 2 · FORGETTING", "#5a7d6e"),
-    "Scene 4: The Integration": ("PHASE 3 · INTEGRATION","#6e7a9e"),
-    "Scene 5: Rehearsal Tools": ("REHEARSAL ONLY",        "#666666"),
-}
-
-def phase_colour(scene_name: str) -> str:
-    return PHASE_LABELS.get(scene_name, ("", "#888888"))[1]
-
-def phase_label(scene_name: str) -> str:
-    return PHASE_LABELS.get(scene_name, ("", ""))[0]
-
-# ─────────────────────────────────────────────
-# 4. SESSION STATE / INITIALISATION
-# ─────────────────────────────────────────────
-if "scenes" not in st.session_state:
-    # Attempt to restore from Supabase first
-    if not load_from_supabase():
-        # Default fallback if DB is empty
-        st.session_state.scenes = {
-            "Scene 1: Initial Staging": {
-                "Beat 1: The Setup": [
-                    {"id": str(uuid.uuid4()), "label": "Internal Doubt",
-                     "text": "You feel like you're being lied to.",
-                     "mode": "Subtext", "targets": []}
-                ]
-            }
-        }
-        st.session_state.cast = {}
-        st.session_state.log  = []
-
-if "active_scene" not in st.session_state: 
-    st.session_state.active_scene = list(st.session_state.scenes.keys())[0] if st.session_state.scenes else ""
-if "lib_loaded"   not in st.session_state: 
-    st.session_state.lib_loaded   = False
-
-# ─────────────────────────────────────────────
-# 5. CORE LOGIC
-# ─────────────────────────────────────────────
-def shuffle_beat(scene_name, beat_name):
-    cues        = st.session_state.scenes[scene_name][beat_name]
-    actor_names = list(st.session_state.cast.keys())
-    if not actor_names:
-        st.error("Cannot shuffle: No students in the cast.")
-        return
-    if not cues:
-        st.warning("No cues found in this beat.")
-        return
-    random.shuffle(actor_names)
-    for i, cue in enumerate(cues):
-        assigned = [actor_names[i % len(actor_names)]]
-        cue["targets"] = assigned
-        st.session_state[f"tar_{cue['id']}"] = assigned
-    save_to_supabase()
-
-def fire_cue_whatsapp(cue):
-    if not twilio_client:
-        st.error("Twilio Client not initialised.")
-        return
-    timestamp = time.strftime("%H:%M:%S")
-    content   = cue["text"]
-    targets   = cue["targets"]
-    if not targets:
-        st.warning(f"No targets selected for '{cue['label']}'")
-        return
-    successes = []
-    for name in targets:
-        phone = st.session_state.cast.get(name)
-        if phone:
-            try:
-                clean = phone.strip()
-                if not clean.startswith("+"): clean = "+" + clean
-                twilio_client.messages.create(body=content, from_=TWILIO_FROM, to=f"whatsapp:{clean}")
-                successes.append(name)
-            except Exception as e:
-                st.error(f"Error sending to {name}: {e}")
-    if successes:
-        st.session_state.log.append(f"{timestamp} · FIRED '{cue['label']}' → {', '.join(successes)}")
-        save_to_supabase()
-        st.toast(f"✅ Sent to {len(successes)} student(s)")
-
-# ─────────────────────────────────────────────
-# 6. DARK EDITORIAL THEME (CSS)
+# PAGE CONFIG — must be first Streamlit call
 # ─────────────────────────────────────────────
 st.set_page_config(layout="wide", page_title="Nexus Command · Here & Now")
 
+# ─────────────────────────────────────────────
+# THEME
+# ─────────────────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;1,300&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');
 
-html, body, [class*="css"] { font-family: 'IBM Plex Sans', sans-serif !important; background-color: #0d0d0d !important; color: #f0ede6 !important; }
+html, body, [class*="css"] {
+    font-family: 'IBM Plex Sans', sans-serif !important;
+    background-color: #0d0d0d !important;
+    color: #f0ede6 !important;
+}
 .stApp { background-color: #0d0d0d !important; }
 
-[data-testid="stSidebar"] { background-color: #111111 !important; border-right: 1px solid rgba(255,255,255,0.07) !important; }
-[data-testid="stSidebar"] * { color: #b0aba4 !important; }
-[data-testid="stSidebar"] h1, h2, h3 { color: #f0ede6 !important; }
-
-input, textarea, [data-testid="stTextInput"] input, [data-testid="stTextArea"] textarea {
-    background-color: #1a1a1a !important; border: 1px solid rgba(255,255,255,0.1) !important; color: #f0ede6 !important; border-radius: 4px !important;
+/* Tabs */
+.stTabs [data-baseweb="tab-list"] {
+    background-color: #0d0d0d !important;
+    border-bottom: 1px solid rgba(255,255,255,0.07) !important;
+    gap: 0 !important;
+}
+.stTabs [data-baseweb="tab"] {
+    color: #4a4a46 !important;
+    font-family: 'IBM Plex Mono', monospace !important;
+    font-size: 11px !important;
+    letter-spacing: 0.1em !important;
+    text-transform: uppercase !important;
+    padding: 0.6rem 1.25rem !important;
+    border-radius: 0 !important;
+}
+.stTabs [aria-selected="true"] {
+    color: #c8b89a !important;
+    background-color: #141414 !important;
+    border-bottom: 1px solid #c8b89a !important;
 }
 
+/* Inputs */
+input, textarea,
+[data-testid="stTextInput"] input,
+[data-testid="stTextArea"] textarea {
+    background-color: #1a1a1a !important;
+    border: 1px solid rgba(255,255,255,0.1) !important;
+    color: #f0ede6 !important;
+    border-radius: 4px !important;
+}
+
+/* Buttons */
 .stButton button {
-    background-color: #1a1a1a !important; border: 1px solid rgba(255,255,255,0.12) !important; color: #b0aba4 !important;
-    font-family: 'IBM Plex Mono', monospace !important; font-size: 11px !important; letter-spacing: 0.06em !important;
+    background-color: #1a1a1a !important;
+    border: 1px solid rgba(255,255,255,0.12) !important;
+    color: #b0aba4 !important;
+    font-family: 'IBM Plex Mono', monospace !important;
+    font-size: 11px !important;
+    letter-spacing: 0.06em !important;
 }
-.stButton [data-testid="baseButton-primary"] { background-color: #1e1a15 !important; border-color: rgba(139,115,85,0.5) !important; color: #c8b89a !important; }
+.stButton [data-testid="baseButton-primary"] {
+    background-color: #1e1a15 !important;
+    border-color: rgba(139,115,85,0.5) !important;
+    color: #c8b89a !important;
+}
 
-[data-testid="stExpander"] { background-color: #141414 !important; border: 1px solid rgba(255,255,255,0.07) !important; }
-[data-testid="stVerticalBlockBorderWrapper"] { background-color: #141414 !important; border: 1px solid rgba(255,255,255,0.07) !important; border-radius: 6px !important; }
+/* Expanders / containers */
+[data-testid="stExpander"] {
+    background-color: #141414 !important;
+    border: 1px solid rgba(255,255,255,0.07) !important;
+}
+[data-testid="stVerticalBlockBorderWrapper"] {
+    background-color: #141414 !important;
+    border: 1px solid rgba(255,255,255,0.07) !important;
+    border-radius: 6px !important;
+}
 
-h1 { font-family: 'IBM Plex Sans', sans-serif !important; font-weight: 300 !important; font-size: 22px !important; color: #f0ede6 !important; border-bottom: 1px solid rgba(255,255,255,0.07) !important; padding-bottom: 0.5rem !important; }
-h2 { font-family: 'IBM Plex Mono', monospace !important; font-size: 10px !important; text-transform: uppercase !important; color: #4a4a46 !important; }
+/* Selectbox */
+div[data-testid="stSelectbox"] label {
+    color: #4a4a46 !important;
+    font-size: 10px !important;
+    font-family: 'IBM Plex Mono', monospace !important;
+}
+
+/* Headings */
+h1 {
+    font-family: 'IBM Plex Sans', sans-serif !important;
+    font-weight: 300 !important;
+    font-size: 22px !important;
+    color: #f0ede6 !important;
+    border-bottom: 1px solid rgba(255,255,255,0.07) !important;
+    padding-bottom: 0.5rem !important;
+}
+h2 {
+    font-family: 'IBM Plex Mono', monospace !important;
+    font-size: 10px !important;
+    text-transform: uppercase !important;
+    color: #4a4a46 !important;
+}
 
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); }
 </style>
 """, unsafe_allow_html=True)
 
-def phase_badge_html(scene_name: str) -> str:
-    label, colour = phase_label(scene_name), phase_colour(scene_name)
+# ─────────────────────────────────────────────
+# CLIENTS
+# ─────────────────────────────────────────────
+try:
+    twilio_client = Client(st.secrets["TWILIO_SID"], st.secrets["TWILIO_TOKEN"])
+    TWILIO_FROM = st.secrets["TWILIO_FROM"]
+except Exception:
+    twilio_client = None
+    TWILIO_FROM = ""
+
+try:
+    supabase: SupabaseClient = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+except Exception:
+    supabase = None
+
+LIBRARY_PATH = os.path.join(os.path.dirname(__file__), "nexus_cue_library.json")
+
+# ─────────────────────────────────────────────
+# CONSTANTS
+# ─────────────────────────────────────────────
+PHASE_CONFIG = {
+    0: ("REHEARSAL ONLY",        "#666666"),
+    1: ("PHASE 1 · EXPOSURE",    "#8b7355"),
+    2: ("PHASE 2 · FORGETTING",  "#5a7d6e"),
+    3: ("PHASE 3 · INTEGRATION", "#6e7a9e"),
+}
+SCENE_PHASE_MAP = {
+    "Scene 1: Arrival":         1,
+    "Scene 2: The Reason":      1,
+    "Scene 3: The Forgetting":  2,
+    "Scene 4: The Integration": 3,
+    "Scene 5: Rehearsal Tools": 0,
+}
+
+# ─────────────────────────────────────────────
+# SUPABASE — CAST
+# ─────────────────────────────────────────────
+def sb_get_cast():
+    if not supabase: return []
+    try:
+        return supabase.table("nexus_cast").select("*").order("name").execute().data or []
+    except: return []
+
+def sb_add_cast(name, phone, notes=""):
+    if not supabase: return
+    supabase.table("nexus_cast").insert({
+        "id": str(uuid.uuid4()), "name": name, "phone": phone, "notes": notes
+    }).execute()
+
+def sb_delete_cast(cast_id):
+    if not supabase: return
+    supabase.table("nexus_cast").delete().eq("id", cast_id).execute()
+
+# ─────────────────────────────────────────────
+# SUPABASE — CREW
+# ─────────────────────────────────────────────
+def sb_get_crew():
+    if not supabase: return []
+    try:
+        return supabase.table("nexus_crew").select("*").order("name").execute().data or []
+    except: return []
+
+def sb_add_crew(name, role, phone):
+    if not supabase: return
+    supabase.table("nexus_crew").insert({
+        "id": str(uuid.uuid4()), "name": name, "role": role, "phone": phone
+    }).execute()
+
+def sb_delete_crew(crew_id):
+    if not supabase: return
+    supabase.table("nexus_crew").delete().eq("id", crew_id).execute()
+
+# ─────────────────────────────────────────────
+# SUPABASE — CUE LIBRARY
+# ─────────────────────────────────────────────
+def sb_get_library():
+    if not supabase: return []
+    try:
+        return supabase.table("nexus_cue_library").select("*").order("scene_name").execute().data or []
+    except: return []
+
+def sb_add_cue(label, text, mode, scene_name, beat_name, phase):
+    if not supabase: return
+    supabase.table("nexus_cue_library").insert({
+        "id": str(uuid.uuid4()), "label": label, "text": text,
+        "mode": mode, "scene_name": scene_name, "beat_name": beat_name, "phase": phase
+    }).execute()
+
+def sb_update_cue(cue_id, label, text, mode):
+    if not supabase: return
+    supabase.table("nexus_cue_library").update({
+        "label": label, "text": text, "mode": mode
+    }).eq("id", cue_id).execute()
+
+def sb_delete_cue(cue_id):
+    if not supabase: return
+    supabase.table("nexus_cue_library").delete().eq("id", cue_id).execute()
+
+def seed_library_from_json():
+    """One-time import of nexus_cue_library.json → Supabase."""
+    if not os.path.exists(LIBRARY_PATH) or not supabase:
+        return 0
+    with open(LIBRARY_PATH, "r", encoding="utf-8") as f:
+        lib = json.load(f)
+    count = 0
+    for scene in lib.get("scenes", []):
+        scene_name = scene["name"]
+        phase = scene.get("phase", 0)
+        for beat in scene.get("beats", []):
+            beat_name = beat["name"]
+            for cue in beat.get("cues", []):
+                try:
+                    supabase.table("nexus_cue_library").insert({
+                        "id":         cue.get("id", str(uuid.uuid4())),
+                        "label":      cue["label"],
+                        "text":       cue["text"],
+                        "mode":       cue.get("mode", "Subtext"),
+                        "scene_name": scene_name,
+                        "beat_name":  beat_name,
+                        "phase":      phase,
+                    }).execute()
+                    count += 1
+                except: pass
+    return count
+
+# ─────────────────────────────────────────────
+# SUPABASE — SESSIONS
+# ─────────────────────────────────────────────
+def sb_get_sessions():
+    if not supabase: return []
+    try:
+        return supabase.table("nexus_sessions").select("*").order("session_date", desc=False).execute().data or []
+    except: return []
+
+def sb_create_session(name, stype, session_date, notes=""):
+    if not supabase: return None
+    sid = str(uuid.uuid4())
+    supabase.table("nexus_sessions").insert({
+        "id": sid, "name": name, "type": stype,
+        "session_date": str(session_date), "notes": notes,
+        "locked": False, "plan": {}
+    }).execute()
+    return sid
+
+def sb_update_plan(session_id, plan):
+    if not supabase: return
+    supabase.table("nexus_sessions").update({"plan": plan}).eq("id", session_id).execute()
+
+def sb_lock_session(session_id):
+    if not supabase: return
+    supabase.table("nexus_sessions").update({"locked": True}).eq("id", session_id).execute()
+
+def sb_delete_session(session_id):
+    if not supabase: return
+    supabase.table("nexus_sessions").delete().eq("id", session_id).execute()
+    supabase.table("nexus_cue_log").delete().eq("session_id", session_id).execute()
+
+# ─────────────────────────────────────────────
+# SUPABASE — LOG
+# ─────────────────────────────────────────────
+def sb_log_fired(session_id, cue_id, label, text, targets):
+    if not supabase: return
+    supabase.table("nexus_cue_log").insert({
+        "id":         str(uuid.uuid4()),
+        "session_id": session_id,
+        "cue_id":     cue_id,
+        "cue_label":  label,
+        "cue_text":   text,
+        "targets":    targets,
+        "fired_at":   datetime.utcnow().isoformat(),
+    }).execute()
+
+def sb_get_log(session_id, limit=25):
+    if not supabase: return []
+    try:
+        return supabase.table("nexus_cue_log").select("*").eq(
+            "session_id", session_id
+        ).order("fired_at", desc=True).limit(limit).execute().data or []
+    except: return []
+
+# ─────────────────────────────────────────────
+# TWILIO — FIRE
+# ─────────────────────────────────────────────
+def send_whatsapp(phone, text):
+    if not twilio_client: return False, "Twilio not initialised"
+    clean = phone.strip()
+    if not clean.startswith("+"): clean = "+" + clean
+    try:
+        twilio_client.messages.create(body=text, from_=TWILIO_FROM, to=f"whatsapp:{clean}")
+        return True, ""
+    except Exception as e:
+        return False, str(e)
+
+def fire_cue(cue_id, label, text, targets, people_lookup, session_id):
+    """Fire a cue to a list of target names. Logs successes."""
+    if not targets:
+        st.warning(f"No recipients selected for '{label}'")
+        return
+    successes, errors = [], []
+    for name in targets:
+        phone = people_lookup.get(name)
+        if not phone:
+            errors.append(f"{name}: no phone")
+            continue
+        ok, err = send_whatsapp(phone, text)
+        if ok:
+            successes.append(name)
+        else:
+            errors.append(f"{name}: {err}")
+    if successes:
+        sb_log_fired(session_id, cue_id, label, text, successes)
+        st.toast(f"✅ '{label}' → {', '.join(successes)}")
+    for e in errors:
+        st.error(e)
+
+# ─────────────────────────────────────────────
+# HTML HELPERS
+# ─────────────────────────────────────────────
+def mono(text, size="11px", color="#b0aba4"):
+    return (
+        f'<span style="font-family:\'IBM Plex Mono\',monospace;'
+        f'font-size:{size};color:{color};">{text}</span>'
+    )
+
+def phase_badge(phase: int) -> str:
+    label, colour = PHASE_CONFIG.get(phase, ("", "#888888"))
     if not label: return ""
-    return f'<span style="font-family:\'IBM Plex Mono\',monospace;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;padding:2px 8px;border-radius:3px;background:{colour}22;color:{colour};border:1px solid {colour}44;margin-left:10px;">{label}</span>'
+    return (
+        f'<span style="font-family:\'IBM Plex Mono\',monospace;font-size:9px;'
+        f'letter-spacing:0.1em;text-transform:uppercase;padding:2px 8px;'
+        f'border-radius:3px;background:{colour}22;color:{colour};'
+        f'border:1px solid {colour}44;">{label}</span>'
+    )
+
+def mode_badge(mode: str) -> str:
+    colours = {"Subtext": "#9e8e7e", "Spoken": "#7e9e8e", "Targeted": "#8e7e9e"}
+    c = colours.get(mode, "#888888")
+    return (
+        f'<span style="font-family:\'IBM Plex Mono\',monospace;font-size:9px;'
+        f'padding:2px 7px;border-radius:3px;background:{c}22;color:{c};'
+        f'border:1px solid {c}44;">{mode}</span>'
+    )
+
+def divider():
+    st.markdown('<hr style="border:none;border-top:1px solid rgba(255,255,255,0.07);margin:1rem 0;">', unsafe_allow_html=True)
+
+def section_label(text, color="#4a4a46"):
+    st.markdown(
+        f'<div style="font-family:\'IBM Plex Mono\',monospace;font-size:9px;'
+        f'letter-spacing:0.14em;text-transform:uppercase;color:{color};'
+        f'margin-bottom:0.6rem;">{text}</div>',
+        unsafe_allow_html=True
+    )
 
 # ─────────────────────────────────────────────
-# 7. SIDEBAR
+# HEADER
 # ─────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("""
-    <div style="padding:0.5rem 0 1.25rem;">
-      <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:#4a4a46;margin-bottom:4px;">SSF-2026-HERE-NOW</div>
-      <div style="font-family:'IBM Plex Sans',sans-serif;font-size:18px;font-weight:300;letter-spacing:-0.02em;color:#f0ede6;">Nexus <span style="color:#c8b89a;font-style:italic;">Command</span></div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    if os.path.exists(LIBRARY_PATH) and st.button("⬆ Import Cue Library", use_container_width=True):
-        st.session_state.scenes = load_library_into_scenes(LIBRARY_PATH)
-        st.session_state.active_scene = list(st.session_state.scenes.keys())[0]
-        st.session_state.lib_loaded = True
-        save_to_supabase()
-        st.rerun()
-
-    st.markdown("---")
-    st.markdown("### Scenes")
-    scene_names = list(st.session_state.scenes.keys())
-    st.session_state.active_scene = st.selectbox("Active scene", scene_names, index=scene_names.index(st.session_state.active_scene) if st.session_state.active_scene in scene_names else 0, label_visibility="collapsed")
-    
-    col_a, col_b = st.columns(2)
-    new_scene_name = col_a.text_input("New scene", placeholder="New scene name…", label_visibility="collapsed")
-    if col_a.button("＋ Scene", use_container_width=True):
-        if new_scene_name and new_scene_name not in st.session_state.scenes:
-            st.session_state.scenes[new_scene_name] = {"New Beat": []}
-            st.session_state.active_scene = new_scene_name
-            save_to_supabase()
-            st.rerun()
-    if len(scene_names) > 1 and col_b.button("✕ Delete", use_container_width=True):
-        del st.session_state.scenes[st.session_state.active_scene]
-        st.session_state.active_scene = list(st.session_state.scenes.keys())[0]
-        save_to_supabase()
-        st.rerun()
-
-    st.markdown("---")
-    st.markdown("### Cast")
-    c_name, c_phone = st.text_input("Name", placeholder="Student name…", label_visibility="collapsed"), st.text_input("Phone", placeholder="+61400000000", label_visibility="collapsed")
-    if st.button("＋ Add student", use_container_width=True):
-        if c_name and c_phone:
-            st.session_state.cast[c_name] = c_phone
-            save_to_supabase()
-            st.rerun()
-
-    if st.session_state.cast:
-        for name, num in st.session_state.cast.items():
-            st.markdown(f'<div style="font-family:\'IBM Plex Mono\',monospace;font-size:10px;color:#888880;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><span style="color:#c8b89a;">{name}</span> {num}</div>', unsafe_allow_html=True)
-        if st.button("✕ Clear cast", use_container_width=True):
-            st.session_state.cast = {}
-            save_to_supabase()
-            st.rerun()
+st.markdown("""
+<div style="padding:0.75rem 0 0.5rem;">
+  <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:0.14em;
+       text-transform:uppercase;color:#4a4a46;margin-bottom:4px;">SSF-2026-HERE-NOW</div>
+  <div style="font-family:'IBM Plex Sans',sans-serif;font-size:24px;font-weight:300;
+       letter-spacing:-0.02em;color:#f0ede6;">
+    Nexus <span style="color:#c8b89a;font-style:italic;">Command</span>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# 8. MAIN PANEL
+# TABS
 # ─────────────────────────────────────────────
-active_scene = st.session_state.active_scene
-badge_html   = phase_badge_html(active_scene)
-st.markdown(f'<h1>{active_scene}{badge_html}</h1>', unsafe_allow_html=True)
+tab_fire, tab_sessions, tab_library, tab_people = st.tabs([
+    "🎬  Fire",
+    "📋  Sessions",
+    "📚  Library",
+    "👥  People",
+])
 
-active_data = st.session_state.scenes[active_scene]
-if st.button("＋ Add Beat", type="secondary"):
-    active_data[f"Beat {len(active_data) + 1}"] = []
-    save_to_supabase()
-    st.rerun()
+# ═══════════════════════════════════════════════════════════════
+# TAB 1 · FIRE
+# ═══════════════════════════════════════════════════════════════
+with tab_fire:
+    sessions_all = sb_get_sessions()
+    cast_list    = sb_get_cast()
+    crew_list    = sb_get_crew()
+    cast_lookup  = {p["name"]: p["phone"] for p in cast_list}
+    crew_lookup  = {p["name"]: p["phone"] for p in crew_list}
+    all_people   = {**cast_lookup, **crew_lookup}
+    all_names    = list(cast_lookup.keys()) + list(crew_lookup.keys())
 
-for beat_name, cues in list(active_data.items()):
-    with st.expander(f"↳ {beat_name} · {len(cues)} cues", expanded=True):
-        bc1, bc2, bc3, bc4 = st.columns([2.5, 1, 1, 0.7])
-        renamed = bc1.text_input("Rename", beat_name, key=f"r_{beat_name}", label_visibility="collapsed")
-        if renamed != beat_name:
-            active_data[renamed] = active_data.pop(beat_name)
-            save_to_supabase()
+    if not sessions_all:
+        st.info("No sessions yet — create one in the Sessions tab.")
+    else:
+        # Session selector
+        rehearsals   = [s for s in sessions_all if s["type"] == "rehearsal"]
+        performances = [s for s in sessions_all if s["type"] == "performance"]
+
+        def session_label(s):
+            lock = "🔒 " if s.get("locked") else ""
+            return f"{lock}{s['name']}  ·  {s['session_date']}"
+
+        fire_col1, fire_col2 = st.columns([4, 1])
+        with fire_col1:
+            all_for_select = sessions_all
+            labels = [session_label(s) for s in all_for_select]
+            chosen_idx = fire_col1.selectbox(
+                "Session", range(len(labels)),
+                format_func=lambda i: labels[i],
+                key="fire_session_select",
+                label_visibility="collapsed"
+            )
+        active = all_for_select[chosen_idx]
+        locked = active.get("locked", False)
+        stype  = active.get("type", "rehearsal")
+        colour = "#8b7355" if stype == "performance" else "#5a7d6e"
+
+        fire_col2.markdown(
+            f'<div style="padding:6px 10px;border-radius:4px;'
+            f'background:{colour}11;border:1px solid {colour}33;'
+            f'font-family:\'IBM Plex Mono\',monospace;font-size:9px;'
+            f'letter-spacing:0.08em;color:{colour};text-transform:uppercase;'
+            f'text-align:center;">{"🔒 LOCKED" if locked else stype}</div>',
+            unsafe_allow_html=True
+        )
+
+        session_id = active["id"]
+        plan = active.get("plan") or {}
+        library = sb_get_library()
+        lib_by_id = {c["id"]: c for c in library}
+
+        if not plan:
+            st.markdown(
+                f'{mono("No cues planned for this session. Build the plan in the Sessions tab.", "12px", "#4a4a46")}',
+                unsafe_allow_html=True
+            )
+        else:
+            for scene_name, beats in plan.items():
+                phase = SCENE_PHASE_MAP.get(scene_name, 0)
+                _, pc = PHASE_CONFIG.get(phase, ("", "#888888"))
+                st.markdown(
+                    f'<div style="margin-top:1.5rem;margin-bottom:0.4rem;'
+                    f'font-family:\'IBM Plex Mono\',monospace;font-size:10px;'
+                    f'letter-spacing:0.1em;text-transform:uppercase;color:{pc};">'
+                    f'{scene_name} &nbsp;{phase_badge(phase)}</div>',
+                    unsafe_allow_html=True
+                )
+                for beat_name, entries in beats.items():
+                    with st.expander(f"↳ {beat_name}  ·  {len(entries)} cues", expanded=True):
+                        for entry in entries:
+                            cue_id = entry.get("cue_id") if isinstance(entry, dict) else entry
+                            base   = lib_by_id.get(cue_id)
+                            if not base:
+                                continue
+                            stored_targets = entry.get("targets", []) if isinstance(entry, dict) else []
+                            with st.container(border=True):
+                                h1, h2 = st.columns([5, 1])
+                                h1.markdown(
+                                    f'{mono(base["label"], "12px", "#c8b89a")} &nbsp;{mode_badge(base["mode"])}',
+                                    unsafe_allow_html=True
+                                )
+                                h1.markdown(
+                                    f'<div style="font-size:13px;color:#d0cdc6;padding:4px 0 8px;'
+                                    f'line-height:1.55;">{base["text"]}</div>',
+                                    unsafe_allow_html=True
+                                )
+                                tar_key  = f"ft_{session_id}_{cue_id}"
+                                selected = h1.multiselect(
+                                    "Recipients", all_names,
+                                    default=[t for t in stored_targets if t in all_names],
+                                    key=tar_key, label_visibility="collapsed"
+                                )
+                                if isinstance(entry, dict):
+                                    entry["targets"] = selected
+                                if h2.button("\u25b6", key=f"fire_{session_id}_{cue_id}",
+                                             type="primary", use_container_width=True):
+                                    if locked:
+                                        st.warning("Session is locked.")
+                                    else:
+                                        fire_cue(cue_id, base["label"], base["text"],
+                                                 selected, all_people, session_id)
+                                        sb_update_plan(session_id, plan)
+
+        # Live log
+        divider()
+        section_label("Live Transmission Log")
+        log_entries = sb_get_log(session_id)
+        if log_entries:
+            for e in log_entries:
+                ts  = (e.get("fired_at") or "")[:19].replace("T", " ")
+                tgt = ", ".join(e.get("targets") or [])
+                st.markdown(
+                    f'<div style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;'
+                    f'color:#4a4a46;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04);">'
+                    f'{ts} · FIRED <span style="color:#888880;">\'{e["cue_label"]}\' </span>'
+                    f' → {tgt}</div>',
+                    unsafe_allow_html=True
+                )
+        else:
+            st.markdown(
+                mono("Waiting to fire first cue\u2026", "11px", "#2a2a2a"),
+                unsafe_allow_html=True
+            )
+
+
+# ═══════════════════════════════════════════════════════════════
+# TAB 2 · SESSIONS
+# ═══════════════════════════════════════════════════════════════
+with tab_sessions:
+    sessions_all = sb_get_sessions()
+    library      = sb_get_library()
+    lib_by_id    = {c["id"]: c for c in library}
+
+    left, right = st.columns([1, 2])
+
+    with left:
+        section_label("Sessions")
+
+        with st.expander("＋ New Session", expanded=not sessions_all):
+            ns_name  = st.text_input("Session name", placeholder="Mon 4 May — Actor Workshop", key="ns_name")
+            ns_type  = st.radio("Type", ["rehearsal", "performance"], horizontal=True, key="ns_type")
+            ns_date  = st.date_input("Date", value=date(2026, 5, 4), key="ns_date")
+            ns_notes = st.text_area("Notes", height=56, placeholder="Brief intent…", key="ns_notes")
+            if st.button("Create", use_container_width=True, type="primary", key="create_session_btn"):
+                if ns_name:
+                    new_id = sb_create_session(ns_name, ns_type, ns_date, ns_notes)
+                    st.session_state["sess_edit"] = new_id
+                    st.rerun()
+
+        rehearsals   = [s for s in sessions_all if s["type"] == "rehearsal"]
+        performances = [s for s in sessions_all if s["type"] == "performance"]
+
+        if rehearsals:
+            st.markdown('<div style="height:0.5rem;"></div>', unsafe_allow_html=True)
+            section_label("Rehearsals", "#666666")
+            for s in rehearsals:
+                is_active = st.session_state.get("sess_edit") == s["id"]
+                icon = "🔒 " if s.get("locked") else ""
+                if st.button(f"{icon}{s['name']}", key=f"sb_{s['id']}",
+                             use_container_width=True,
+                             type="primary" if is_active else "secondary"):
+                    st.session_state["sess_edit"] = s["id"]
+                    st.rerun()
+
+        if performances:
+            st.markdown('<div style="height:0.5rem;"></div>', unsafe_allow_html=True)
+            section_label("Performance", "#8b7355")
+            for s in performances:
+                is_active = st.session_state.get("sess_edit") == s["id"]
+                icon = "🔒 " if s.get("locked") else ""
+                if st.button(f"{icon}{s['name']}", key=f"sb_{s['id']}",
+                             use_container_width=True,
+                             type="primary" if is_active else "secondary"):
+                    st.session_state["sess_edit"] = s["id"]
+                    st.rerun()
+
+    with right:
+        edit_id = st.session_state.get("sess_edit")
+        editing = next((s for s in sessions_all if s["id"] == edit_id), None)
+
+        if not editing:
+            st.markdown(
+                '<div style="color:#2a2a2a;font-family:\'IBM Plex Mono\',monospace;'
+                'font-size:12px;padding:2rem 0;">← Select a session to build its plan</div>',
+                unsafe_allow_html=True
+            )
+        else:
+            plan   = editing.get("plan") or {}
+            locked = editing.get("locked", False)
+
+            hc1, hc2, hc3 = st.columns([4, 1, 1])
+            hc1.markdown(
+                f'<div style="font-family:\'IBM Plex Sans\',sans-serif;font-size:18px;'
+                f'font-weight:300;color:#f0ede6;">{editing["name"]}</div>'
+                f'<div style="font-family:\'IBM Plex Mono\',monospace;font-size:9px;'
+                f'color:#4a4a46;text-transform:uppercase;">'
+                f'{editing["type"]} · {editing["session_date"]}</div>',
+                unsafe_allow_html=True
+            )
+            if not locked:
+                if hc2.button("🔒 Lock", use_container_width=True, key=f"lock_{edit_id}"):
+                    sb_lock_session(edit_id)
+                    st.rerun()
+                if hc3.button("🗑 Delete", use_container_width=True, key=f"del_{edit_id}"):
+                    sb_delete_session(edit_id)
+                    del st.session_state["sess_edit"]
+                    st.rerun()
+            else:
+                hc2.markdown(
+                    '<div style="padding:6px;background:#1e1515;border:1px solid rgba(180,60,60,0.3);'
+                    'border-radius:4px;font-family:\'IBM Plex Mono\',monospace;font-size:9px;'
+                    'color:#c87070;text-align:center;">🔒 LOCKED</div>',
+                    unsafe_allow_html=True
+                )
+
+            divider()
+
+            if locked:
+                section_label("Plan — read only")
+                for scene_name, beats in plan.items():
+                    phase = SCENE_PHASE_MAP.get(scene_name, 0)
+                    st.markdown(f'**{scene_name}** &nbsp;{phase_badge(phase)}', unsafe_allow_html=True)
+                    for beat_name, entries in beats.items():
+                        labels = [
+                            lib_by_id.get(
+                                e.get("cue_id") if isinstance(e, dict) else e, {}
+                            ).get("label", "?")
+                            for e in entries
+                        ]
+                        st.markdown(
+                            f'{mono(f"↳ {beat_name}", "11px", "#888880")} &nbsp;'
+                            f'{mono(", ".join(labels), "10px", "#4a4a46")}',
+                            unsafe_allow_html=True
+                        )
+            else:
+                section_label("Plan Builder")
+
+                all_scene_names = sorted(set(c["scene_name"] for c in library))
+                addable_scenes  = [s for s in all_scene_names if s not in plan] + ["Custom…"]
+                with st.expander("＋ Add Scene to Plan"):
+                    sc_choice = st.selectbox("Scene", addable_scenes,
+                                             key=f"sc_{edit_id}", label_visibility="collapsed")
+                    sc_custom = ""
+                    if sc_choice == "Custom…":
+                        sc_custom = st.text_input("Scene name", key=f"sc_custom_{edit_id}")
+                    if st.button("Add Scene", key=f"add_sc_{edit_id}", type="primary"):
+                        name = sc_custom if sc_choice == "Custom…" else sc_choice
+                        if name and name not in plan:
+                            plan[name] = {}
+                            sb_update_plan(edit_id, plan)
+                            st.rerun()
+
+                for scene_name in list(plan.keys()):
+                    beats = plan[scene_name]
+                    phase = SCENE_PHASE_MAP.get(scene_name, 0)
+                    _, pc = PHASE_CONFIG.get(phase, ("", "#888888"))
+
+                    with st.expander(
+                        f"{scene_name}  ·  {sum(len(v) for v in beats.values())} cues",
+                        expanded=True
+                    ):
+                        row1, row2 = st.columns([5, 1])
+                        row1.markdown(phase_badge(phase), unsafe_allow_html=True)
+                        if row2.button("Remove", key=f"rm_sc_{edit_id}_{scene_name}"):
+                            del plan[scene_name]
+                            sb_update_plan(edit_id, plan)
+                            st.rerun()
+
+                        lib_beats   = sorted(set(
+                            c["beat_name"] for c in library if c["scene_name"] == scene_name
+                        ))
+                        avail_beats = [b for b in lib_beats if b not in beats] + ["Custom…"]
+                        ba1, ba2    = st.columns([4, 1])
+                        beat_pick   = ba1.selectbox("Beat", avail_beats,
+                                                    key=f"bp_{edit_id}_{scene_name}",
+                                                    label_visibility="collapsed")
+                        bc_custom = ""
+                        if beat_pick == "Custom…":
+                            bc_custom = ba1.text_input("Beat name", key=f"bc_{edit_id}_{scene_name}")
+                        if ba2.button("＋ Beat", key=f"add_bt_{edit_id}_{scene_name}",
+                                     use_container_width=True):
+                            bname = bc_custom if beat_pick == "Custom…" else beat_pick
+                            if bname and bname not in beats:
+                                beats[bname] = []
+                                sb_update_plan(edit_id, plan)
+                                st.rerun()
+
+                        for beat_name in list(beats.keys()):
+                            entries = beats[beat_name]
+                            st.markdown(
+                                f'<div style="font-family:\'IBM Plex Mono\',monospace;'
+                                f'font-size:10px;color:#888880;margin:0.75rem 0 0.25rem;'
+                                f'border-top:1px solid rgba(255,255,255,0.05);padding-top:0.5rem;">'
+                                f'↳ {beat_name}</div>',
+                                unsafe_allow_html=True
+                            )
+                            for entry in list(entries):
+                                cue_id = entry.get("cue_id") if isinstance(entry, dict) else entry
+                                base   = lib_by_id.get(cue_id, {})
+                                if base:
+                                    ce1, ce2 = st.columns([6, 1])
+                                    ce1.markdown(
+                                        f'{mono(base["label"], "11px", "#c8b89a")} &nbsp;{mode_badge(base["mode"])}',
+                                        unsafe_allow_html=True
+                                    )
+                                    if ce2.button("✕", key=f"rm_cue_{edit_id}_{beat_name}_{cue_id}"):
+                                        entries.remove(entry)
+                                        sb_update_plan(edit_id, plan)
+                                        st.rerun()
+
+                            existing_ids = [
+                                e.get("cue_id") if isinstance(e, dict) else e for e in entries
+                            ]
+                            addable_cues = [
+                                c for c in library
+                                if c["scene_name"] == scene_name
+                                and c["beat_name"] == beat_name
+                                and c["id"] not in existing_ids
+                            ]
+                            if addable_cues:
+                                opts = {f"{c['label']} ({c['mode']})": c["id"] for c in addable_cues}
+                                aca, acb = st.columns([5, 1])
+                                chosen_lbl = aca.selectbox(
+                                    "Add cue", list(opts.keys()),
+                                    key=f"cue_pick_{edit_id}_{beat_name}",
+                                    label_visibility="collapsed"
+                                )
+                                if acb.button("＋", key=f"add_cue_{edit_id}_{beat_name}"):
+                                    entries.append({"cue_id": opts[chosen_lbl], "targets": []})
+                                    sb_update_plan(edit_id, plan)
+                                    st.rerun()
+
+                            if st.button(f"✕ Remove beat", key=f"rm_bt_{edit_id}_{beat_name}"):
+                                del beats[beat_name]
+                                sb_update_plan(edit_id, plan)
+                                st.rerun()
+
+
+# ═══════════════════════════════════════════════════════════════
+# TAB 3 · LIBRARY
+# ═══════════════════════════════════════════════════════════════
+with tab_library:
+    library = sb_get_library()
+
+    lh1, lh2 = st.columns([4, 1])
+    lh1.markdown(
+        f'<div style="font-family:\'IBM Plex Sans\',sans-serif;font-size:18px;'
+        f'font-weight:300;color:#f0ede6;">Cue Library &nbsp;'
+        f'{mono(str(len(library)) + " cues", "12px", "#4a4a46")}</div>',
+        unsafe_allow_html=True
+    )
+    if not library:
+        if lh2.button("⬆ Seed from JSON", use_container_width=True, key="seed_btn"):
+            n = seed_library_from_json()
+            st.success(f"Imported {n} cues")
             st.rerun()
-        if bc2.button("⇄ Shuffle", key=f"s_{beat_name}", use_container_width=True):
-            shuffle_beat(active_scene, beat_name)
+
+    divider()
+    fc1, fc2, fc3 = st.columns(3)
+    phase_opts = ["All Phases"] + [PHASE_CONFIG[p][0] for p in [1, 2, 3, 0]]
+    mode_opts  = ["All Modes", "Subtext", "Spoken", "Targeted"]
+    scene_opts = ["All Scenes"] + sorted(set(c["scene_name"] for c in library))
+
+    f_phase = fc1.selectbox("Phase", phase_opts, key="lib_f_phase", label_visibility="collapsed")
+    f_mode  = fc2.selectbox("Mode",  mode_opts,  key="lib_f_mode",  label_visibility="collapsed")
+    f_scene = fc3.selectbox("Scene", scene_opts, key="lib_f_scene", label_visibility="collapsed")
+
+    filtered = library
+    if f_phase != "All Phases":
+        target_phase = next(k for k, v in PHASE_CONFIG.items() if v[0] == f_phase)
+        filtered = [c for c in filtered if c.get("phase") == target_phase]
+    if f_mode != "All Modes":
+        filtered = [c for c in filtered if c.get("mode") == f_mode]
+    if f_scene != "All Scenes":
+        filtered = [c for c in filtered if c.get("scene_name") == f_scene]
+
+    grouped = defaultdict(lambda: defaultdict(list))
+    for cue in filtered:
+        grouped[cue["scene_name"]][cue["beat_name"]].append(cue)
+
+    for scene_name, beats in grouped.items():
+        phase = SCENE_PHASE_MAP.get(scene_name, 0)
+        _, pc = PHASE_CONFIG.get(phase, ("", "#888888"))
+        st.markdown(
+            f'<div style="margin-top:1.5rem;margin-bottom:0.5rem;'
+            f'font-family:\'IBM Plex Mono\',monospace;font-size:10px;'
+            f'letter-spacing:0.1em;text-transform:uppercase;color:{pc};">'
+            f'{scene_name} &nbsp;{phase_badge(phase)}</div>',
+            unsafe_allow_html=True
+        )
+        for beat_name, cues in beats.items():
+            with st.expander(f"↳ {beat_name}  ·  {len(cues)} cues"):
+                for cue in cues:
+                    with st.container(border=True):
+                        cc1, cc2 = st.columns([6, 1])
+                        cc1.markdown(
+                            f'{mono(cue["label"], "11px", "#c8b89a")} &nbsp;{mode_badge(cue["mode"])}',
+                            unsafe_allow_html=True
+                        )
+                        cc1.markdown(
+                            f'<div style="font-size:13px;color:#d0cdc6;padding:4px 0;line-height:1.55;">'
+                            f'{cue["text"]}</div>',
+                            unsafe_allow_html=True
+                        )
+                        with cc2:
+                            if st.button("✎", key=f"ed_{cue['id']}"):
+                                current = st.session_state.get(f"editing_{cue['id']}", False)
+                                st.session_state[f"editing_{cue['id']}"] = not current
+                            if st.button("✕", key=f"dl_{cue['id']}"):
+                                sb_delete_cue(cue["id"])
+                                st.rerun()
+                        if st.session_state.get(f"editing_{cue['id']}"):
+                            e_label = st.text_input("Label", cue["label"], key=f"el_{cue['id']}")
+                            e_text  = st.text_area("Text", cue["text"], key=f"et_{cue['id']}", height=80)
+                            e_mode  = st.radio(
+                                "Mode", ["Subtext", "Spoken", "Targeted"],
+                                index=["Subtext","Spoken","Targeted"].index(cue.get("mode","Subtext")),
+                                key=f"em_{cue['id']}", horizontal=True
+                            )
+                            if st.button("Save", key=f"sv_{cue['id']}", type="primary"):
+                                sb_update_cue(cue["id"], e_label, e_text, e_mode)
+                                st.session_state.pop(f"editing_{cue['id']}", None)
+                                st.rerun()
+
+    divider()
+    section_label("Add New Cue to Library")
+
+    nc1, nc2 = st.columns(2)
+    new_label = nc1.text_input("Label", placeholder="Cue label…", key="ncl")
+    new_mode  = nc2.radio("Mode", ["Subtext", "Spoken", "Targeted"], key="ncm", horizontal=True)
+    new_text  = st.text_area("Text", placeholder="The message sent to the student…", key="nct", height=80)
+
+    scene_choices = sorted(set(c["scene_name"] for c in library)) + ["New Scene…"]
+    nc3, nc4 = st.columns(2)
+    new_scene = nc3.selectbox("Scene", scene_choices, key="ncs", label_visibility="collapsed")
+    if new_scene == "New Scene…":
+        new_scene = nc3.text_input("Scene name", key="ncs_custom")
+
+    beat_choices = sorted(set(
+        c["beat_name"] for c in library if c["scene_name"] == new_scene
+    )) + ["New Beat…"]
+    new_beat = nc4.selectbox("Beat", beat_choices, key="ncb", label_visibility="collapsed")
+    if new_beat == "New Beat…":
+        new_beat = nc4.text_input("Beat name", key="ncb_custom")
+
+    new_phase = SCENE_PHASE_MAP.get(new_scene, 0)
+
+    if st.button("＋ Add to Library", type="primary", key="add_to_lib"):
+        if new_label and new_text and new_scene and new_beat:
+            sb_add_cue(new_label, new_text, new_mode, new_scene, new_beat, new_phase)
+            st.toast(f"✅ '{new_label}' added to library")
             st.rerun()
-        if bc3.button("▶ Fire all", key=f"fa_{beat_name}", use_container_width=True):
-            for c in cues: fire_cue_whatsapp(c)
-        if bc4.button("✕", key=f"db_{beat_name}", use_container_width=True):
-            del active_data[beat_name]
-            save_to_supabase()
-            st.rerun()
 
-        st.markdown('<hr style="margin:0.5rem 0 0.75rem;">', unsafe_allow_html=True)
 
-        for cue in cues:
-            with st.container(border=True):
-                mode_colour, mode_bg = ("#9e8e7e", "#9e8e7e22") if cue["mode"] == "Subtext" else ("#7e9e8e", "#7e9e8e22")
-                st.markdown(f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><span style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;font-weight:500;color:#c8b89a;text-transform:uppercase;">{cue["label"]}</span><span style="font-family:\'IBM Plex Mono\',monospace;font-size:9px;padding:2px 7px;border-radius:3px;background:{mode_bg};color:{mode_colour};border:1px solid {mode_colour}44;">{cue["mode"]}</span></div>', unsafe_allow_html=True)
-                
-                ch1, ch2, ch3 = st.columns([0.55, 0.35, 0.1])
-                cue["label"] = ch1.text_input("Label", cue["label"], key=f"l_{cue['id']}", label_visibility="collapsed")
-                cue["mode"] = ch2.radio("Mode", ["Subtext", "Spoken"], index=0 if cue["mode"] == "Subtext" else 1, key=f"m_{cue['id']}", horizontal=True, label_visibility="collapsed")
-                if ch3.button("✕", key=f"d_{cue['id']}"):
-                    cues.remove(cue); save_to_supabase(); st.rerun()
+# ═══════════════════════════════════════════════════════════════
+# TAB 4 · PEOPLE
+# ═══════════════════════════════════════════════════════════════
+with tab_people:
+    cast_list = sb_get_cast()
+    crew_list = sb_get_crew()
 
-                cue["text"] = st.text_area("Text", cue["text"], height=68, key=f"t_{cue['id']}", label_visibility="collapsed")
-                cue["targets"] = st.multiselect("Recipients", list(st.session_state.cast.keys()), default=[t for t in cue["targets"] if t in st.session_state.cast], key=f"tar_{cue['id']}")
-                if st.button(f"▶ Send — {cue['label']}", key=f"f_{cue['id']}", type="primary"):
-                    fire_cue_whatsapp(cue)
+    pc1, pc2 = st.columns(2)
 
-        if st.button(f"＋ Add cue to {beat_name}", key=f"ac_{beat_name}"):
-            cues.append({"id": str(uuid.uuid4()), "label": "New Cue", "text": "", "mode": "Subtext", "targets": []})
-            save_to_supabase(); st.rerun()
+    with pc1:
+        section_label(f"Cast · {len(cast_list)} Students", "#8b7355")
+        for p in cast_list:
+            r1, r2, r3 = st.columns([3, 2.5, 0.5])
+            r1.markdown(mono(p["name"], "12px", "#c8b89a"), unsafe_allow_html=True)
+            r2.markdown(mono(p["phone"], "10px", "#4a4a46"), unsafe_allow_html=True)
+            if r3.button("✕", key=f"dc_{p['id']}"):
+                sb_delete_cast(p["id"])
+                st.rerun()
+            if p.get("notes"):
+                st.markdown(mono(p["notes"], "10px", "#3a3a36"), unsafe_allow_html=True)
 
-# ─────────────────────────────────────────────
-# 9. LIVE LOG
-# ─────────────────────────────────────────────
-st.markdown('<hr style="margin:2rem 0 1rem;">', unsafe_allow_html=True)
-st.markdown('<div style="font-family:\'IBM Plex Mono\',monospace;font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:#4a4a46;margin-bottom:0.75rem;">Live Transmission Log</div>', unsafe_allow_html=True)
+        divider()
+        ca, cb = st.columns(2)
+        add_c_name  = ca.text_input("Name",  placeholder="Student name…",  key="ac_name",  label_visibility="collapsed")
+        add_c_phone = cb.text_input("Phone", placeholder="+61400000000",    key="ac_phone", label_visibility="collapsed")
+        add_c_notes = st.text_input("Notes (optional)",
+                                    placeholder="e.g. Year 11 — trans boy",
+                                    key="ac_notes", label_visibility="collapsed")
+        if st.button("＋ Add Student", use_container_width=True, key="add_cast"):
+            if add_c_name and add_c_phone:
+                sb_add_cast(add_c_name, add_c_phone, add_c_notes)
+                st.rerun()
 
-if st.session_state.log:
-    for entry in reversed(st.session_state.log[-15:]):
-        st.markdown(f'<div style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;color:#4a4a46;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04);">{entry}</div>', unsafe_allow_html=True)
-else:
-    st.markdown('<div style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;color:#2a2a2a;font-style:italic;">Waiting to fire first cue…</div>', unsafe_allow_html=True)
+    with pc2:
+        section_label(f"Crew · {len(crew_list)} Members", "#5a7d6e")
+        for p in crew_list:
+            r1, r2, r3, r4 = st.columns([2.5, 2, 2, 0.5])
+            r1.markdown(mono(p["name"], "12px", "#d0cdc6"), unsafe_allow_html=True)
+            r2.markdown(mono(p.get("role", ""), "10px", "#5a7d6e"), unsafe_allow_html=True)
+            r3.markdown(mono(p["phone"], "10px", "#4a4a46"), unsafe_allow_html=True)
+            if r4.button("✕", key=f"dcr_{p['id']}"):
+                sb_delete_crew(p["id"])
+                st.rerun()
+
+        divider()
+        cra, crb = st.columns(2)
+        add_cr_name  = cra.text_input("Name", placeholder="Crew name…",    key="acr_name",  label_visibility="collapsed")
+        add_cr_role  = crb.text_input("Role", placeholder="e.g. Camera 1", key="acr_role",  label_visibility="collapsed")
+        add_cr_phone = st.text_input("Phone", placeholder="+61400000000",   key="acr_phone", label_visibility="collapsed")
+        if st.button("＋ Add Crew Member", use_container_width=True, key="add_crew"):
+            if add_cr_name and add_cr_phone:
+                sb_add_crew(add_cr_name, add_cr_role, add_cr_phone)
+                st.rerun()
+
+    divider()
+    section_label("WhatsApp Handshake Test")
+    all_people_list = cast_list + crew_list
+    all_names_test  = [p["name"] for p in all_people_list]
+    all_phones_test = {p["name"]: p["phone"] for p in all_people_list}
+
+    tw1, tw2 = st.columns(2)
+    test_who = tw1.selectbox("Recipient", ["—"] + all_names_test,
+                             key="tw_who", label_visibility="collapsed")
+    test_msg = tw2.text_input("Message", placeholder="Test message…",
+                              key="tw_msg", label_visibility="collapsed")
+    if st.button("Send Test", key="tw_send"):
+        if test_who != "—" and test_msg:
+            ok, err = send_whatsapp(all_phones_test.get(test_who, ""), test_msg)
+            if ok:
+                st.success(f"✅ Sent to {test_who}")
+            else:
+                st.error(f"Failed: {err}")
