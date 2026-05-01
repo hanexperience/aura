@@ -191,11 +191,18 @@ def sb_get_library():
         return supabase.table("nexus_cue_library").select("*").order("scene_name").execute().data or []
     except: return []
 
+# From your ui.py
 def sb_add_cue(label, text, mode, scene_name, beat_name, phase):
     if not supabase: return
     supabase.table("nexus_cue_library").insert({
-        "id": str(uuid.uuid4()), "label": label, "text": text,
-        "mode": mode, "scene_name": scene_name, "beat_name": beat_name, "phase": phase
+        "id": str(uuid.uuid4()), 
+        "label": label, 
+        "text": text,
+        "mode": mode, 
+        "scene_name": scene_name, 
+        "beat_name": beat_name, 
+        "phase": phase
+        # MISSING: rehearsal_day
     }).execute()
 
 def sb_update_cue(cue_id, label, text, mode):
@@ -293,12 +300,23 @@ def sb_get_log(session_id, limit=25):
 # ─────────────────────────────────────────────
 # TWILIO — FIRE
 # ─────────────────────────────────────────────
-def send_whatsapp(phone, text):
+def send_whatsapp(phone, text=None):
     if not twilio_client: return False, "Twilio not initialised"
+    
     clean = phone.strip()
     if not clean.startswith("+"): clean = "+" + clean
+    
     try:
-        twilio_client.messages.create(body=text, from_=TWILIO_FROM, to=f"whatsapp:{clean}")
+        # 1. Use the SID from your screenshot
+        msg_service_sid = "MG02e2301ca0ca9f7881a0190637323f1d"
+        # 2. Use the SID from your 'aura_welcome' template
+        template_sid = "HXe36a26d8401f326ad09ef8b1424d78d9"
+        
+        twilio_client.messages.create(
+            messaging_service_sid=msg_service_sid,
+            to=f"whatsapp:{clean}",
+            content_sid=template_sid
+        )
         return True, ""
     except Exception as e:
         return False, str(e)
