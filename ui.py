@@ -144,6 +144,29 @@ SCENE_PHASE_MAP = {
     "Scene 5: Rehearsal Tools": 0,
 }
 
+def send_whatsapp(phone, text=None):
+    """Sends a WhatsApp template message via Twilio."""
+    if not twilio_client: 
+        return False, "Twilio not initialised"
+    
+    clean = phone.strip()
+    if not clean.startswith("+"): 
+        clean = "+" + clean
+    
+    try:
+        # Using your specific Aura template and service SIDs
+        msg_service_sid = "MG02e2301ca0ca9f7881a0190637323f1d"
+        template_sid = "HXe36a26d8401f326ad09ef8b1424d78d9"
+        
+        twilio_client.messages.create(
+            messaging_service_sid=msg_service_sid,
+            to=f"whatsapp:{clean}",
+            content_sid=template_sid
+        )
+        return True, ""
+    except Exception as e:
+        return False, str(e)
+    
 # ─────────────────────────────────────────────
 # PUBLIC ONBOARDING VIEW
 # ─────────────────────────────────────────────
@@ -189,7 +212,7 @@ def sb_add_cast(name, phone, pronoun, notes=""):
         "id": str(uuid.uuid4()), 
         "name": name, 
         "phone": phone, 
-        "pronoun": pronoun, # Ensure this column exists in Supabase
+        "pronoun": pronoun,
         "notes": notes
     }).execute()
 
@@ -342,28 +365,7 @@ def sb_get_log(session_id, limit=25):
 # ─────────────────────────────────────────────
 # TWILIO — FIRE
 # ─────────────────────────────────────────────
-def send_whatsapp(phone, text=None):
-    """Sends a WhatsApp template message via Twilio."""
-    if not twilio_client: 
-        return False, "Twilio not initialised"
-    
-    clean = phone.strip()
-    if not clean.startswith("+"): 
-        clean = "+" + clean
-    
-    try:
-        # Using your specific Aura template and service SIDs
-        msg_service_sid = "MG02e2301ca0ca9f7881a0190637323f1d"
-        template_sid = "HXe36a26d8401f326ad09ef8b1424d78d9"
-        
-        twilio_client.messages.create(
-            messaging_service_sid=msg_service_sid,
-            to=f"whatsapp:{clean}",
-            content_sid=template_sid
-        )
-        return True, ""
-    except Exception as e:
-        return False, str(e)
+
 
 def fire_cue(cue_id, label, text, targets, people_lookup, session_id):
     """Fire a cue to a list of target names. Logs successes."""
@@ -1146,9 +1148,9 @@ with tab_library:
 with tab_people:
     # --- QR SECTION ---
     with st.expander("📢 ENROLLMENT QR CODE"):
-        reg_url = "https://your-app-url.streamlit.app/?mode=join"
+        reg_url = "https://aurafrankston.streamlit.app//?mode=join"
         st.write("Display this for student enrollment:")
-        st.image(f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={reg_url}")
+        st.image(f"https://hereandnow.events/images/CastLogin.png")
         st.code(reg_url)
     
     cast_list = sb_get_cast()
@@ -1182,10 +1184,10 @@ with tab_people:
                                     placeholder="e.g. Year 11",
                                     key="ac_notes", label_visibility="collapsed")
         
-        if st.button("＋ Add Student", use_container_width=True, key="add_cast"):
-            if add_c_name and add_c_phone:
-                # Passing pronouns to the database function
-                sb_add_cast(add_c_name, add_c_phone, add_c_pronoun, add_c_notes)
+        if st.button("＋ Create Session", use_container_width=True, key="create_session_btn"):
+            if ns_name:
+                new_id = sb_create_session(ns_name, ns_type, ns_date, ns_notes)
+                st.session_state["sess_edit"] = new_id
                 st.rerun()
 
     with pc2:
