@@ -182,10 +182,15 @@ def sb_get_cast():
         return supabase.table("nexus_cast").select("*").order("name").execute().data or []
     except: return []
 
-def sb_add_cast(name, phone, notes=""):
+def sb_add_cast(name, phone, pronoun, notes=""):
+    """Adds a student to the nexus_cast table with pronouns."""
     if not supabase: return
     supabase.table("nexus_cast").insert({
-        "id": str(uuid.uuid4()), "name": name, "phone": phone, "notes": notes
+        "id": str(uuid.uuid4()), 
+        "name": name, 
+        "phone": phone, 
+        "pronoun": pronoun, # Ensure this column exists in Supabase
+        "notes": notes
     }).execute()
 
 def sb_delete_cast(cast_id):
@@ -229,11 +234,17 @@ def sb_get_library():
 
 # From your ui.py
 def sb_add_cue(label, text, mode, scene_name, beat_name, phase, rehearsal_day="Performance"):
+    """Adds a cue and prevents the 'rehearsal_day' error."""
     if not supabase: return
     supabase.table("nexus_cue_library").insert({
-        "id": str(uuid.uuid4()), "label": label, "text": text,
-        "mode": mode, "scene_name": scene_name, "beat_name": beat_name, 
-        "phase": phase, "rehearsal_day": rehearsal_day # Added default value
+        "id": str(uuid.uuid4()), 
+        "label": label, 
+        "text": text,
+        "mode": mode, 
+        "scene_name": scene_name, 
+        "beat_name": beat_name, 
+        "phase": phase,
+        "rehearsal_day": rehearsal_day # Default value added
     }).execute()
 
 def sb_update_cue(cue_id, label, text, mode):
@@ -332,15 +343,17 @@ def sb_get_log(session_id, limit=25):
 # TWILIO — FIRE
 # ─────────────────────────────────────────────
 def send_whatsapp(phone, text=None):
-    if not twilio_client: return False, "Twilio not initialised"
+    """Sends a WhatsApp template message via Twilio."""
+    if not twilio_client: 
+        return False, "Twilio not initialised"
     
     clean = phone.strip()
-    if not clean.startswith("+"): clean = "+" + clean
+    if not clean.startswith("+"): 
+        clean = "+" + clean
     
     try:
-        # 1. Use the SID from your screenshot
+        # Using your specific Aura template and service SIDs
         msg_service_sid = "MG02e2301ca0ca9f7881a0190637323f1d"
-        # 2. Use the SID from your 'aura_welcome' template
         template_sid = "HXe36a26d8401f326ad09ef8b1424d78d9"
         
         twilio_client.messages.create(
@@ -815,10 +828,10 @@ with tab_sessions:
             ns_type  = st.radio("Type", ["rehearsal", "performance"], horizontal=True, key="ns_type")
             ns_date  = st.date_input("Date", value=date(2026, 5, 4), key="ns_date")
             ns_notes = st.text_area("Notes", height=56, placeholder="Brief intent…", key="ns_notes")
-            if st.button("Create", use_container_width=True, type="primary", key="create_session_btn"):
-                if ns_name:
-                    new_id = sb_create_session(ns_name, ns_type, ns_date, ns_notes)
-                    st.session_state["sess_edit"] = new_id
+            if st.button("＋ Add Student", use_container_width=True, key="add_cast"):
+                if add_c_name and add_c_phone:
+                    # Now passing 4 arguments: name, phone, pronoun, notes
+                    sb_add_cast(add_c_name, add_c_phone, add_c_pronoun, add_c_notes)
                     st.rerun()
 
         rehearsals   = [s for s in sessions_all if s["type"] == "rehearsal"]
