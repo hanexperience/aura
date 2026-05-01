@@ -145,6 +145,35 @@ SCENE_PHASE_MAP = {
 }
 
 # ─────────────────────────────────────────────
+# PUBLIC ONBOARDING VIEW
+# ─────────────────────────────────────────────
+query_params = st.query_params
+if query_params.get("mode") == "join":
+    st.markdown("### Join the Nexus Cast")
+    
+    with st.form("cast_registration"):
+        name = st.text_input("Full Name", autocomplete="name")
+        phone = st.text_input("WhatsApp Number", placeholder="+61...", autocomplete="tel")
+        pronoun = st.selectbox("Pronouns", ["they/them", "she/her", "he/him", "other"])
+        
+        if st.form_submit_button("Register"):
+            if name and phone:
+                try:
+                    # Save to Supabase and trigger welcome message
+                    supabase.table("nexus_cast").insert({
+                        "id": str(uuid.uuid4()), "name": name, 
+                        "phone": phone, "pronoun": pronoun, "notes": "Self-registered"
+                    }).execute()
+                    send_whatsapp(phone) 
+                    st.success("Welcome to the Nexus. Check your WhatsApp.")
+                    st.balloons()
+                except Exception as e:
+                    st.error(f"Error: {e}")
+            else:
+                st.warning("Please provide name and phone.")
+    st.stop() # Stops the dashboard from loading for students
+
+# ─────────────────────────────────────────────
 # SUPABASE — CAST
 # ─────────────────────────────────────────────
 def sb_get_cast():
@@ -163,6 +192,13 @@ def sb_delete_cast(cast_id):
     if not supabase: return
     supabase.table("nexus_cast").delete().eq("id", cast_id).execute()
 
+def sb_add_cast(name, phone, pronoun, notes=""):
+    if not supabase: return
+    supabase.table("nexus_cast").insert({
+        "id": str(uuid.uuid4()), "name": name, "phone": phone, 
+        "pronoun": pronoun, "notes": notes # Added pronoun here
+    }).execute()
+    
 # ─────────────────────────────────────────────
 # SUPABASE — CREW
 # ─────────────────────────────────────────────
@@ -192,17 +228,12 @@ def sb_get_library():
     except: return []
 
 # From your ui.py
-def sb_add_cue(label, text, mode, scene_name, beat_name, phase):
+def sb_add_cue(label, text, mode, scene_name, beat_name, phase, rehearsal_day="Performance"):
     if not supabase: return
     supabase.table("nexus_cue_library").insert({
-        "id": str(uuid.uuid4()), 
-        "label": label, 
-        "text": text,
-        "mode": mode, 
-        "scene_name": scene_name, 
-        "beat_name": beat_name, 
-        "phase": phase
-        # MISSING: rehearsal_day
+        "id": str(uuid.uuid4()), "label": label, "text": text,
+        "mode": mode, "scene_name": scene_name, "beat_name": beat_name, 
+        "phase": phase, "rehearsal_day": rehearsal_day # Added default value
     }).execute()
 
 def sb_update_cue(cue_id, label, text, mode):
@@ -1096,38 +1127,52 @@ with tab_library:
             st.toast(f"✅ '{new_label}' added to library")
             st.rerun()
 
-
 # ═══════════════════════════════════════════════════════════════
 # TAB 4 · PEOPLE
 # ═══════════════════════════════════════════════════════════════
 with tab_people:
+    # --- QR SECTION ---
+    with st.expander("📢 ENROLLMENT QR CODE"):
+        reg_url = "https://your-app-url.streamlit.app/?mode=join"
+        st.write("Display this for student enrollment:")
+        st.image(f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={reg_url}")
+        st.code(reg_url)
+    
     cast_list = sb_get_cast()
-    crew_list = sb_get_crew()
+    crew_list = sb_get_crew() # Ensure crew_list is fetched for pc2
 
     pc1, pc2 = st.columns(2)
 
     with pc1:
         section_label(f"Cast · {len(cast_list)} Students", "#8b7355")
         for p in cast_list:
-            r1, r2, r3 = st.columns([3, 2.5, 0.5])
+            # Updated to 4 columns to fit Pronouns
+            r1, r2, r3, r4 = st.columns([2.5, 1.5, 2, 0.5]) 
             r1.markdown(mono(p["name"], "12px", "#c8b89a"), unsafe_allow_html=True)
-            r2.markdown(mono(p["phone"], "10px", "#4a4a46"), unsafe_allow_html=True)
-            if r3.button("✕", key=f"dc_{p['id']}"):
+            # Displaying the Pronoun
+            r2.markdown(mono(p.get("pronoun", ""), "10px", "#666666"), unsafe_allow_html=True) 
+            r3.markdown(mono(p["phone"], "10px", "#4a4a46"), unsafe_allow_html=True)
+            if r4.button("✕", key=f"dc_{p['id']}"):
                 sb_delete_cast(p["id"])
                 st.rerun()
             if p.get("notes"):
                 st.markdown(mono(p["notes"], "10px", "#3a3a36"), unsafe_allow_html=True)
 
         divider()
-        ca, cb = st.columns(2)
-        add_c_name  = ca.text_input("Name",  placeholder="Student name…",  key="ac_name",  label_visibility="collapsed")
-        add_c_phone = cb.text_input("Phone", placeholder="+61400000000",    key="ac_phone", label_visibility="collapsed")
+        # manual Add Student form with Pronoun selector
+        ca, cb, cc = st.columns([3, 2, 3])
+        add_c_name = ca.text_input("Name", placeholder="Name…", key="ac_name", label_visibility="collapsed")
+        add_c_pronoun = cb.selectbox("Pronoun", ["they/them", "she/her", "he/him", "other"], key="ac_pronoun", label_visibility="collapsed")
+        add_c_phone = cc.text_input("Phone", placeholder="+61...", key="ac_phone", label_visibility="collapsed")
+        
         add_c_notes = st.text_input("Notes (optional)",
-                                    placeholder="e.g. Year 11 — trans boy",
+                                    placeholder="e.g. Year 11",
                                     key="ac_notes", label_visibility="collapsed")
+        
         if st.button("＋ Add Student", use_container_width=True, key="add_cast"):
             if add_c_name and add_c_phone:
-                sb_add_cast(add_c_name, add_c_phone, add_c_notes)
+                # Passing pronouns to the database function
+                sb_add_cast(add_c_name, add_c_phone, add_c_pronoun, add_c_notes)
                 st.rerun()
 
     with pc2:
